@@ -1,0 +1,47 @@
+{
+ "cfg": {
+  "banco": "ganador",
+  "causal": false,
+  "car": true,
+  "w_s": 1.5,
+  "w_pot": [],
+  "entrenar": "puro",
+  "m_csp": 6,
+  "lam_cov": 0.05,
+  "nk": 24,
+  "nk_modo": "kmeans",
+  "recentrar": false,
+  "regresor": "multinomial",
+  "alpha": 1.0,
+  "C": 0.01,
+  "shrink": 0.1,
+  "prior": "objetivo",
+  "n_feats": 0,
+  "post": "lineal",
+  "post_taps": 160,
+  "post_alpha": 1.0,
+  "recorte": 1.0
+ },
+ "cv_reference": {
+  "a": {
+   "mse": 0.2152535050503459,
+   "mse_cero": 0.39803259921863043,
+   "reduccion": 0.45920634271437666
+  },
+  "b": {
+   "mse": 0.3648607383827772,
+   "mse_cero": 0.39803259921863043,
+   "reduccion": 0.08333955786780334
+  },
+  "f": {
+   "mse": 0.1848609242292763,
+   "mse_cero": 0.39799551453118864,
+   "reduccion": 0.5355200813078766
+  },
+  "g": {
+   "mse": 0.19298346732937494,
+   "mse_cero": 0.3980114071224635,
+   "reduccion": 0.5151308131477846
+  }
+ }
+}

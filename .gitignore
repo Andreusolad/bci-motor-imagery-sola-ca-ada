@@ -1,0 +1,10 @@
+# datasets and everything the scripts generate
+data/
+cache/
+outputs/
+
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.DS_Store
+Thumbs.db
