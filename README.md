@@ -320,3 +320,4 @@ MIT, see [LICENSE](LICENSE).
 ## Contact
 
 Aniol Cañada (aniolcanada@gmail.com), Andreu Solà (andreusolad@gmail.com).
+
