@@ -6,7 +6,7 @@ by Aniol Cañada and Andreu Solà.
 
 The study has two routes that share no code, data split or preprocessing, so that the
 places where they agree can be read as replications. This repository holds the code of
-**route A** (Andreu Solà) in `route_a/`. Route B (Aniol Cañada) will be added in `route_b/`.
+both: **route A** (Andreu Solà) in `route_a/` and **route B** (Aniol Cañada) in `route_b/`.
 
 Only the scripts behind the results reported in the paper are included; exploratory
 analyses were left out.
@@ -19,6 +19,13 @@ analyses were left out.
 | `route_a/async_stieger/` | Asynchronous decoding on Stieger2021 with an explicit rest class: rest-class formulations, detector occlusion, visual-cue controls, passive rest from Physionet, cost per intent, user aptitude | Sec. 5.2, 5.3, 5.5.1 |
 | `route_a/bci_iv_1/` | BCI Competition IV Data Set 1 (asynchronous, official MSE): silence baseline, the D12 and D13 systems, causality test by perturbation | Sec. 5.4.2, 5.4.3 |
 | `route_a/split_80_20_subjects.json` | Subject split used throughout (50 training, 12 validation subjects) | |
+| `route_b/two_class/` | EEGNet and EEGSym on Stieger2021 under three normalizations, legacy vs corrected window, subject-level bootstrap CIs, per-subject calibration, temporal and band importance | Sec. 5.1 |
+| `route_b/continuous/` | Three-class REST/LEFT/RIGHT decoder and continuous five-minute streams: hierarchical gate, threshold sweep, calibration, temporal HMM filter, continuous training, per-command evaluation | Sec. 5.2, 5.3 |
+| `route_b/detection/` | Detection diagnostics: delta-band confound (retrain behind a 4 Hz high-pass), band/channel importance, dedicated binary REST-vs-MI gate | Sec. 5.2 |
+| `route_b/transfer/` | Zero-shot transfer of the Stieger decoder to BCI-IV-2a (EEGSym and EEGNet) and Physionet, with a contralateral-ERD label check | Sec. 5.4.1 |
+| `route_b/bci_iv_1/` | BCI Competition IV Data Set 1, official MSE: zero-shot three-class, soft vs hard output, EMA + hedging, per-subject calibration, and a per-subject EEGNet regressor (`regression/`) | Sec. 5.4.2 |
+| `route_b/channels/` | Electrode-count sweep (8/16/32 channels, EEGNet + EA) on Stieger and on BCI-IV-1 | Sec. 5.5.2 |
+| `route_b/dataset_split.json` | Subject split used throughout route B (36 training, 13 validation, 13 test subjects) | |
 
 ## Setup
 
@@ -55,7 +62,16 @@ $BCI_DATA/
 - **BCI Competition IV Data Set 1**: `python route_a/bci_iv_1/download.py` downloads the
   100 Hz recordings and the true labels from bbci.de.
 
-Caches and results are written to `cache/` and `outputs/` inside each folder.
+**Route B** reads the same four datasets from the same `$BCI_DATA` root, with two format
+differences: it uses the **`.mat`** version of BCI Competition IV 2a
+(`bci_iv_2a/A01T.mat ... A09T.mat`) instead of the `.npz`, and the **1000 Hz** BCI
+Competition IV Data Set 1 (`bci_iv_1/BCICIV_1calib_1000Hz_mat/`,
+`bci_iv_1/BCICIV_1eval_1000Hz_mat/`, `bci_iv_1/true_labels_official/mat/`) from the
+[competition page](https://www.bbci.de/competition/iv/). Stieger2021
+(`stieger2021/S{n}_Session_{m}.mat`) and Physionet use the same layout as above.
+
+Caches and results are written to `cache/` and `outputs/` inside each folder; route B
+writes trained models and metrics under `route_b/experiments/`.
 
 ## Reproducing the results
 
@@ -146,6 +162,137 @@ python causality_test.py                       # perturbation test  (~1 h)
 The 2012 winning entry scored 0.382. This pipeline has no randomness left unseeded:
 with the library versions above, `run_shot.py` reproduces the per-subject values of the
 paper exactly.
+
+## Reproducing the results (Route B)
+
+Route B uses TensorFlow/Keras (CPU is enough; no GPU required) and is organized as a
+shared core (`route_b/src`, `route_b/lib`) plus one folder per result group. Run each
+script from its own folder with `BCI_DATA` set; outputs are written under
+`route_b/experiments/`. Several evaluations load the two-class and three-class models
+trained first, so run the folders in the order below. Seeds are fixed (42); training the
+networks is not bit-reproducible across machines, so small deviations are expected.
+
+The sixth corrected-window two-class model (EEGSym + running-exponential) is assumed
+already trained; `run_corrected_window_study.py` trains the other five.
+
+### Two-class decoding (`route_b/two_class`)
+
+```
+python run_study.py                              # EEGNet x {z-score, running-exp, EA}, legacy window
+python run_eegsym_study.py                       # EEGSym x {z-score, running-exp, EA}, legacy window
+python run_corrected_window_study.py             # both architectures, corrected [+2, +2+len] window
+python phase1_subject_ci.py                      # subject-bootstrap CIs and paired contrasts
+python analyze_temporal_decay_corrected.py       # softmax mass across the trial, corrected window
+python analyze_frequency_importance_corrected.py # band-permutation importance
+python finetune_subject_corrected.py             # per-subject calibration, 5 subjects
+python main.py --stage all                       # plain 1-D CNN baseline
+```
+
+| Result | Value | Where |
+|---|---|---|
+| 1-D CNN baseline, per crop | 0.623, AUC 0.671 | `experiments/legacy_window/approach_a_baseline/metrics.json` |
+| Six corrected-window models, subject-mean accuracy | 0.693 to 0.752 | `experiments/subject_ci/summary.json` |
+| EEGSym - EEGNet (paired, 13 subjects) | +0.025, 95% CI [+0.012, +0.039], 11/2 | `experiments/subject_ci/summary.json` |
+| Legacy vs corrected window | normalization ranking flips; accuracy rises | `experiments/*/normalization/*/comparison/` |
+| Per-subject calibration on Stieger (5 subjects) | +4.0 points, 4/5 improve | `experiments/corrected_window/subject_finetuning/summary.json` |
+
+### Three-class and continuous decoding (`route_b/continuous`)
+
+Needs the corrected-window EEGSym + EA two-class winner (above).
+
+```
+python train_3class.py --arch eegsym --method euclidean_alignment    # 3-class REST/LEFT/RIGHT
+python continuous_eval.py --arch eegsym --method euclidean_alignment  # 5-min streams
+python hierarchical_eval.py                      # REST gate + separate L/R head
+python threshold_sweep.py
+python calibration_eval.py                       # per-subject calibration
+python combined_eval.py                          # calibration + gate + smoothing ladder
+python temporal_filter_eval.py                   # majority vote and causal HMM
+python train_continuous.py                       # detector trained on continuous windows
+python continuous_plus_filter.py                 # continuous detector + HMM
+python command_eval.py                           # per-command (drone) evaluation
+python calibration_command_eval.py               # calibration -> directional error
+```
+
+| Result | Value | Where |
+|---|---|---|
+| Flat 3-class recall: REST / RIGHT / LEFT (LEFT collapse) | 0.865 / 0.600 / 0.168 | `experiments/rest_3class/summary.json` |
+| LEFT recall, flat vs hierarchical (continuous) | 0.171 -> 0.468 | `experiments/continuous_eval_hierarchical/summary.json` |
+| MI detection on continuous streams, AUC | ~0.77 (0.865 on clean crops) | `experiments/continuous_eval/summary.json` |
+| Per-command directional error when acting | 34-38%, near-invariant across models | `experiments/command_eval/summary.json` |
+| Per-subject calibration -> directional error | 38% -> 28%, 9/10 improve | `experiments/calibration_command/summary.json` |
+| Continuous + HMM, best MI-detection F1 | 0.262 | `experiments/continuous_trained/with_temporal_filter/summary.json` |
+
+### Detection diagnostics (`route_b/detection`)
+
+```
+python delta_confound_control.py                 # retrain behind a 4 Hz high-pass (double dissociation)
+python feature_importance.py                     # channel and band importance of the 3-class model
+python binary_rest_mi.py                         # dedicated binary REST-vs-MI gate
+python binary_on_continuous.py
+python train_binary_continuous.py
+```
+
+| Result | Value | Where |
+|---|---|---|
+| Detection AUC without delta (retrain) | 0.887 -> 0.713 (-0.175) | `experiments/delta_confound/summary.json` |
+| Direction AUC without delta (control) | 0.797 -> 0.795 (-0.001) | `experiments/delta_confound/summary.json` |
+| Dedicated binary gate vs 3-class gate, AUC | 0.759 vs 0.732 | `experiments/binary_on_continuous/summary.json` |
+
+### Transfer (`route_b/transfer`)
+
+Zero-shot from the Stieger EEGSym + EA winner; target labels are checked by contralateral
+ERD before scoring.
+
+```
+python bciciv2a_eval.py                          # EEGSym + EA -> BCI-IV-2a
+python bciciv2a_eegnet_eval.py                   # EEGNet + EA -> BCI-IV-2a
+python physionet_eval.py                         # 106 subjects, bimodal distribution
+```
+
+| Result | Value | Where |
+|---|---|---|
+| BCI-IV-2a, EEGSym + EA, cold | 0.738, 95% CI [0.680, 0.806], AUC 0.817 | `experiments/bciciv2a_eval/summary.json` |
+| BCI-IV-2a, EEGNet + EA, cold | 0.736, 95% CI [0.667, 0.813] | `experiments/bciciv2a_eegnet_eval/summary.json` |
+| Physionet, EEGSym + EA, 106 subjects | 0.637, 95% CI [0.611, 0.665], AUC 0.700 | `experiments/physionet_eval/summary.json` |
+
+### BCI Competition IV Data Set 1 (`route_b/bci_iv_1`)
+
+```
+python bciciv1_eval.py                           # 3-class zero-shot, asynchronous metrics
+python bciciv1_mse_eval.py                       # official MSE: soft and hard output
+python bciciv1_async_postproc.py                 # EMA smoothing + hedging (leave-one-subject-out)
+python bciciv1_calibration.py                    # per-subject calibration on calib
+python bciciv1_regressor.py                      # per-subject regressor trained on the dataset
+python bciciv1_regressor_pretrained.py           # Stieger-pretrained regressor, fine-tuned per subject
+python regression/run.py --mode pretrain         # self-contained modular regressor
+python regression/analyze_bciciv1.py             # per-subject CIs and detection/direction split
+```
+
+| Result | Value | Where |
+|---|---|---|
+| Silence baseline (real subjects), MSE | 0.5098 pooled (0.5094 subject mean) | `experiments/bciciv1_mse/summary.json` |
+| Soft vs hard output, MSE | 0.4795 vs 0.7922 | `experiments/bciciv1_mse/summary.json` |
+| + EMA smoothing and hedging | 0.4726 | `experiments/bciciv1_postproc/summary.json` |
+| Per-subject calibration | 0.4830 (worse); balanced acc 0.403 -> 0.423 | `experiments/bciciv1_calibration/summary.json` |
+| Regressor from scratch / Stieger pretrain + fine-tune | 0.4332 / 0.4131 | `experiments/bciciv1_regressor_pretrained/summary.json` |
+| Best regressor: detection vs direction | detection AUC 0.580, sign accuracy 0.762 | `bci_iv_1/regression/results/` |
+
+### Electrode-count sweep (`route_b/channels`)
+
+```
+python train_channels.py --set 8
+python train_channels.py --set 16
+python train_channels.py --set 32
+python bciciv1_mse_channels.py --set 8
+python bciciv1_mse_channels.py --set 16
+```
+
+| Result | Value | Where |
+|---|---|---|
+| Stieger accuracy at 8 / 16 / 32 channels | 0.7068 / 0.7260 / 0.7458 | `experiments/eegnet_ea_{8,16,32}ch/summary.json` |
+| 8 -> 32 channels, paired | +0.034, 95% CI [+0.009, +0.057], 11/2 | `experiments/eegnet_ea_32ch/summary.json` |
+| Channel models on BCI-IV-1 (binary, no idle), MSE | 0.527 (8) / 0.548 (16), both above 0.509 | `experiments/eegnet_ea_{8,16}ch/bciciv1_mse.json` |
 
 ## Notes
 

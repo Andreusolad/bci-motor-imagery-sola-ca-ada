@@ -2,6 +2,7 @@
 data/
 cache/
 outputs/
+experiments/
 
 __pycache__/
 *.pyc
